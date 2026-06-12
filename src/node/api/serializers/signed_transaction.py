@@ -8,13 +8,16 @@ from core.models import NbeSerializer
 from models.transactions.transaction import Transaction
 from node.api.serializers.operation import (
     ChannelInscribeOpSerializer,
+    ChannelSetKeysOpSerializer,
     LedgerOpSerializer,
     SDPActiveOpSerializer,
     SDPDeclareOpSerializer,
+    UnknownOpSerializer,
 )
 from node.api.serializers.proof import (
     Ed25519SignatureSerializer,
     OperationProofSerializerField,
+    UnknownProofSerializer,
     ZkAndEd25519SignaturesSerializer,
     ZkSignatureSerializer,
 )
@@ -33,6 +36,8 @@ def _proof_to_internal(proof) -> dict:
             "zk_signature": proof.zk_signature.to_bytes(),
             "ed25519_signature": proof.ed25519_signature,
         }
+    if isinstance(proof, UnknownProofSerializer):
+        return {"type": "Unknown", "raw": proof.raw}
     raise ValueError(f"Unsupported proof type: {type(proof).__name__}")
 
 
@@ -117,6 +122,28 @@ class SignedTransactionSerializer(NbeSerializer, FromRandom):
                             "declaration_id": op.declaration_id,
                             "nonce": op.nonce,
                             "metadata": op.metadata,
+                        },
+                        "proof": _proof_to_internal(proof),
+                    }
+                )
+            elif isinstance(op, ChannelSetKeysOpSerializer):
+                operations.append(
+                    {
+                        "content": {
+                            "type": "ChannelSetKeys",
+                            "channel": op.channel,
+                            "keys": list(op.keys),
+                        },
+                        "proof": _proof_to_internal(proof),
+                    }
+                )
+            elif isinstance(op, UnknownOpSerializer):
+                operations.append(
+                    {
+                        "content": {
+                            "type": "Unknown",
+                            "opcode": op.opcode,
+                            "payload": op.payload,
                         },
                         "proof": _proof_to_internal(proof),
                     }

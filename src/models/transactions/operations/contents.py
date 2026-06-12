@@ -85,6 +85,26 @@ class LeaderClaim(NbeContent):
     mantle_tx_hash: HexBytes
 
 
+class UnknownContent(NbeContent):
+    """Fallback for mantle ops this explorer doesn't have a typed model for.
+
+    Preserves the opcode and raw payload verbatim so new node op types never
+    break block ingestion; typed support can be added later.
+    """
+
+    type: Literal["Unknown"] = "Unknown"
+    opcode: int
+    payload: Optional[Any] = None
+
+
 OperationContent = (
-    LedgerTransfer | ChannelInscribe | ChannelBlob | ChannelSetKeys | SDPDeclare | SDPWithdraw | SDPActive | LeaderClaim
+    LedgerTransfer
+    | ChannelInscribe
+    | ChannelBlob
+    | ChannelSetKeys
+    | SDPDeclare
+    | SDPWithdraw
+    | SDPActive
+    | LeaderClaim
+    | UnknownContent
 )

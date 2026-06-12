@@ -1,3 +1,4 @@
+import logging
 from random import randint
 from typing import Annotated, Any, List, Optional, Self, Union
 
@@ -10,8 +11,11 @@ from node.api.serializers.note import NoteSerializer
 from utils.protocols import FromRandom
 from utils.random import random_bytes
 
+logger = logging.getLogger(__name__)
+
 # Mantle op opcodes.
 OPCODE_LEDGER = 0
+OPCODE_CHANNEL_SET_KEYS = 16
 OPCODE_CHANNEL_INSCRIBE = 17
 OPCODE_SDP_DECLARE = 32
 OPCODE_SDP_ACTIVE = 34
@@ -31,6 +35,22 @@ class LedgerOpSerializer(NbeSerializer, FromRandom):
             {
                 "inputs": [random_bytes(32).hex() for _ in range(n_inputs)],
                 "outputs": [NoteSerializer.from_random() for _ in range(n_outputs)],
+            }
+        )
+
+
+class ChannelSetKeysOpSerializer(NbeSerializer, FromRandom):
+    """Channel set-keys op (opcode 16): sets the signing keys of a channel."""
+
+    channel: BytesFromHexOrIntArray = Field(description="Channel ID.")
+    keys: List[BytesFromHexOrIntArray] = Field(description="Channel signing public keys.")
+
+    @classmethod
+    def from_random(cls) -> Self:
+        return cls.model_validate(
+            {
+                "channel": random_bytes(32).hex(),
+                "keys": [random_bytes(32).hex()],
             }
         )
 
@@ -100,8 +120,20 @@ class SDPActiveOpSerializer(NbeSerializer, FromRandom):
         )
 
 
+class UnknownOpSerializer(NbeSerializer):
+    """Fallback for opcodes without a typed serializer.
+
+    Preserves the opcode and raw payload verbatim so unknown (e.g. newly
+    introduced) op types never break block ingestion.
+    """
+
+    opcode: int
+    payload: Optional[Any] = None
+
+
 OPCODE_TO_SERIALIZER: dict[int, type] = {
     OPCODE_LEDGER: LedgerOpSerializer,
+    OPCODE_CHANNEL_SET_KEYS: ChannelSetKeysOpSerializer,
     OPCODE_CHANNEL_INSCRIBE: ChannelInscribeOpSerializer,
     OPCODE_SDP_DECLARE: SDPDeclareOpSerializer,
     OPCODE_SDP_ACTIVE: SDPActiveOpSerializer,
@@ -110,11 +142,13 @@ OPCODE_TO_SERIALIZER: dict[int, type] = {
 
 MantleOpSerializerVariants = Union[
     LedgerOpSerializer,
+    ChannelSetKeysOpSerializer,
     ChannelInscribeOpSerializer,
     SDPDeclareOpSerializer,
     SDPActiveOpSerializer,
+    UnknownOpSerializer,
 ]
-_MANTLE_OP_SERIALIZER_CLASSES = tuple(OPCODE_TO_SERIALIZER.values())
+_MANTLE_OP_SERIALIZER_CLASSES = tuple(OPCODE_TO_SERIALIZER.values()) + (UnknownOpSerializer,)
 
 
 def _parse_mantle_op(data: Any) -> MantleOpSerializerVariants:
@@ -124,9 +158,8 @@ def _parse_mantle_op(data: Any) -> MantleOpSerializerVariants:
         opcode = data["opcode"]
         serializer_class = OPCODE_TO_SERIALIZER.get(opcode)
         if serializer_class is None:
-            raise ValueError(
-                f"Unsupported mantle op opcode {opcode}; known opcodes: {sorted(OPCODE_TO_SERIALIZER)}."
-            )
+            logger.warning(f"No typed serializer for mantle op opcode {opcode}; storing it verbatim.")
+            return UnknownOpSerializer.model_validate(data)
         return serializer_class.model_validate(data["payload"])
     raise ValueError(f"Cannot parse mantle op from {type(data).__name__}.")
 

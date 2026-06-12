@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Annotated, Any, Self, Union
+from typing import Annotated, Any, Optional, Self, Union
 
 from pydantic import BeforeValidator, Field, RootModel
 
@@ -7,6 +7,7 @@ from core.models import NbeSerializer
 from models.transactions.operations.proofs import (
     Ed25519Signature,
     NbeSignature,
+    UnknownProof as UnknownSignature,
     ZkAndEd25519Signature,
     ZkSignature,
 )
@@ -90,6 +91,23 @@ class ZkAndEd25519SignaturesSerializer(OperationProofSerializer, NbeSerializer):
         )
 
 
+class UnknownProofSerializer(OperationProofSerializer, NbeSerializer):
+    """Fallback for proof variants without a typed serializer (e.g. NoProof).
+
+    Preserves the raw value verbatim so unknown proof types never break block
+    ingestion.
+    """
+
+    raw: Optional[Any] = None
+
+    def into_operation_proof(self) -> NbeSignature:
+        return UnknownSignature.model_validate({"raw": self.raw})
+
+    @classmethod
+    def from_random(cls, *args, **kwargs) -> Self:
+        return cls.model_validate({"raw": "NoProof"})
+
+
 PROOF_TAG_TO_SERIALIZER = {
     "Ed25519Sig": Ed25519SignatureSerializer,
     "ZkSig": ZkSignatureSerializer,
@@ -104,11 +122,13 @@ def _parse_proof(data: Any) -> OperationProofSerializer:
         for tag, serializer_class in PROOF_TAG_TO_SERIALIZER.items():
             if tag in data:
                 return serializer_class.model_validate(data[tag])
-    return data
+    # Unit variants (e.g. "NoProof") arrive as plain strings; unknown tagged
+    # variants arrive as dicts that matched no known tag. Keep them verbatim.
+    return UnknownProofSerializer.model_validate({"raw": data})
 
 
 OperationProofSerializerVariants = Union[
-    Ed25519SignatureSerializer, ZkSignatureSerializer, ZkAndEd25519SignaturesSerializer
+    Ed25519SignatureSerializer, ZkSignatureSerializer, ZkAndEd25519SignaturesSerializer, UnknownProofSerializer
 ]
 OperationProofSerializerField = Annotated[
     OperationProofSerializerVariants,

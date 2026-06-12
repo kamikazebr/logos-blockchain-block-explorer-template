@@ -21,6 +21,7 @@ from node.api.serializers.block import BlockSerializer
 from node.api.serializers.fields import bytes_from_hex_or_intarray
 from node.api.serializers.health import HealthSerializer
 from node.api.serializers.info import InfoSerializer
+from node.api.serializers.operation import ChannelSetKeysOpSerializer, UnknownOpSerializer
 from node.api.serializers.proof import Ed25519SignatureSerializer, ZkSignatureSerializer
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -158,11 +159,50 @@ class TestOldFormatTransaction:
         assert len(first.hash) == 32
 
 
-class TestUnsupportedOpcode:
-    def test_raises_with_known_opcodes_listed(self, new_format_block):
+class TestUnknownOps:
+    def test_unknown_opcode_is_preserved_not_fatal(self, new_format_block):
         new_format_block["transactions"][0]["mantle_tx"]["ops"][0]["opcode"] = 99
-        with pytest.raises(ValueError, match="opcode 99"):
-            BlockSerializer.model_validate(new_format_block)
+        block = BlockSerializer.model_validate(new_format_block)
+        op = block.transactions[0].transaction.ops[0]
+        assert isinstance(op, UnknownOpSerializer)
+        assert op.opcode == 99
+        content = block.transactions[0].into_transaction().operations[0].content
+        assert content.type == "Unknown"
+        assert content.opcode == 99
+        assert content.payload is not None  # raw payload preserved verbatim
+
+    def test_unknown_op_with_noproof_is_preserved_not_fatal(self, new_format_block):
+        # e.g. a LeaderClaim (opcode 48) carries no proof; neither the op nor
+        # the "NoProof" unit variant should break ingestion.
+        tx = new_format_block["transactions"][0]
+        tx["mantle_tx"]["ops"][0] = {"opcode": 48, "payload": {"rewards_root": "aa" * 32}}
+        tx["ops_proofs"][0] = "NoProof"
+        block = BlockSerializer.model_validate(new_format_block)
+        operation = block.transactions[0].into_transaction().operations[0]
+        assert operation.content.type == "Unknown"
+        assert operation.content.opcode == 48
+        assert operation.proof.type == "Unknown"
+        assert operation.proof.raw == "NoProof"
+
+
+class TestChannelSetKeysOp:
+    @pytest.fixture
+    def setkeys_sample(self) -> dict:
+        """Real opcode 16 op + proof captured from the public testnet."""
+        samples = json.loads((FIXTURES / "ops_samples_testnet.json").read_text())
+        return samples["16"]
+
+    def test_real_sample_parses(self, new_format_block, setkeys_sample):
+        tx = new_format_block["transactions"][0]
+        tx["mantle_tx"]["ops"] = [{"opcode": 16, "payload": setkeys_sample["payload"]}]
+        tx["ops_proofs"] = [setkeys_sample["proof"]]
+        block = BlockSerializer.model_validate(new_format_block)
+        op = block.transactions[0].transaction.ops[0]
+        assert isinstance(op, ChannelSetKeysOpSerializer)
+        assert op.channel == bytes.fromhex(setkeys_sample["payload"]["channel"])
+        assert len(op.keys) == len(setkeys_sample["payload"]["keys"])
+        content = block.transactions[0].into_transaction().operations[0].content
+        assert content.type == "ChannelSetKeys"
 
 
 class TestLegacyStorageBlock:
