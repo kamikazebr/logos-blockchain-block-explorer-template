@@ -10,7 +10,7 @@ from models.transactions.operations.proofs import (
     ZkAndEd25519Signature,
     ZkSignature,
 )
-from node.api.serializers.fields import BytesFromHex, BytesFromIntArray
+from node.api.serializers.fields import BytesFromHex, BytesFromHexOrIntArray
 from utils.protocols import EnforceSubclassFromRandom
 from utils.random import random_bytes
 
@@ -22,7 +22,7 @@ class OperationProofSerializer(EnforceSubclassFromRandom, ABC):
 
 
 class Ed25519SignatureSerializer(OperationProofSerializer, RootModel[bytes]):
-    root: BytesFromIntArray
+    root: BytesFromHexOrIntArray
 
     def into_operation_proof(self) -> NbeSignature:
         return Ed25519Signature.model_validate(
@@ -39,9 +39,9 @@ class Ed25519SignatureSerializer(OperationProofSerializer, RootModel[bytes]):
 class ZkSignatureSerializer(OperationProofSerializer, NbeSerializer):
     """Groth16 ZK proof: pi_a (32B) + pi_b (64B) + pi_c (32B) = 128 bytes total."""
 
-    pi_a: BytesFromIntArray
-    pi_b: BytesFromIntArray
-    pi_c: BytesFromIntArray
+    pi_a: BytesFromHexOrIntArray
+    pi_b: BytesFromHexOrIntArray
+    pi_c: BytesFromHexOrIntArray
 
     def to_bytes(self) -> bytes:
         return self.pi_a + self.pi_b + self.pi_c

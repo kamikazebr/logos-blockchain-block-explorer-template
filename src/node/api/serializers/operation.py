@@ -5,7 +5,7 @@ from pydantic import BeforeValidator, Field
 
 from core.models import NbeSerializer
 from models.transactions.operations.contents import SDPDeclareServiceType
-from node.api.serializers.fields import BytesFromHex, BytesFromIntArray
+from node.api.serializers.fields import BytesFromHex, BytesFromHexOrIntArray
 from node.api.serializers.note import NoteSerializer
 from utils.protocols import FromRandom
 from utils.random import random_bytes
@@ -39,7 +39,9 @@ class ChannelInscribeOpSerializer(NbeSerializer, FromRandom):
     """Channel inscribe op (opcode 17): writes an inscription to a channel."""
 
     channel_id: BytesFromHex = Field(description="Channel ID in hex format.")
-    inscription: BytesFromIntArray = Field(description="Inscription bytes (int array).")
+    inscription: BytesFromHexOrIntArray = Field(
+        description="Inscription bytes (int array on older nodes, hex string on newer ones)."
+    )
     parent: BytesFromHex = Field(description="Parent inscription hash in hex format.")
     signer: BytesFromHex = Field(description="Signer public key in hex format.")
 

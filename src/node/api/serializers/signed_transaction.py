@@ -44,7 +44,12 @@ class SignedTransactionSerializer(NbeSerializer, FromRandom):
     )
 
     def _compute_hash(self) -> bytes:
-        data = self.transaction.model_dump(mode="json")
+        # Prefer the canonical hash reported by the node (newer nodes include it
+        # in mantle_tx). A locally computed JSON hash will NOT match the chain's
+        # real tx hash, so it is only a last-resort fallback for older nodes.
+        if self.transaction.hash is not None:
+            return self.transaction.hash
+        data = self.transaction.model_dump(mode="json", exclude={"hash"})
         canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode()).digest()
 

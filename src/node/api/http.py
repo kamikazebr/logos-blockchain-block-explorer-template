@@ -21,6 +21,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def normalize_info_payload(data: dict) -> dict:
+    """Normalize cryptarchia/info responses across node versions.
+
+    Older nodes (<= 0.1.2) return a flat object with mode as a string
+    ("Online"). Newer nodes wrap the fields under "cryptarchia_info" and report
+    mode as a (possibly nested) object like {"Started": "Online"}.
+    """
+    info = dict(data.get("cryptarchia_info", data))
+    mode = data.get("mode", info.get("mode"))
+    while isinstance(mode, dict):
+        mode = next(iter(mode.values()), "Unknown") if mode else "Unknown"
+    info["mode"] = mode if isinstance(mode, str) else str(mode)
+    return info
+
+
 class HttpNodeApi(NodeApi):
     # Paths can't have a leading slash since they are relative to the base URL
     ENDPOINT_INFO = "cryptarchia/info"
@@ -79,7 +94,7 @@ class HttpNodeApi(NodeApi):
         url = urljoin(self.base_url, self.ENDPOINT_INFO)
         response = requests.get(url, auth=self.authentication, timeout=60)
         response.raise_for_status()
-        return InfoSerializer.model_validate(response.json())
+        return InfoSerializer.model_validate(normalize_info_payload(response.json()))
 
     async def get_block_by_hash(self, block_hash: str) -> Optional[BlockSerializer]:
         url = urljoin(self.base_url, self.ENDPOINT_BLOCK_BY_HASH + block_hash)
