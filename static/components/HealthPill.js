@@ -11,6 +11,7 @@ const STATUS = {
 
 export default function HealthPill() {
     const [status, setStatus] = useState(STATUS.CONNECTING);
+    const [nodeApi, setNodeApi] = useState(null);
     const pillRef = useRef(null);
     const abortRef = useRef(null);
 
@@ -33,6 +34,9 @@ export default function HealthPill() {
                 if (typeof item?.healthy === 'boolean') {
                     setStatus(item.healthy ? STATUS.ONLINE : STATUS.OFFLINE);
                 }
+                if (typeof item?.node_api === 'string') {
+                    setNodeApi(item.node_api);
+                }
             },
             {
                 signal: abortRef.current.signal,
@@ -50,7 +54,8 @@ export default function HealthPill() {
 
     const className = 'pill ' + (status === STATUS.ONLINE ? 'online' : status === STATUS.OFFLINE ? 'offline' : '');
 
-    const label = status === STATUS.ONLINE ? 'Online' : status === STATUS.OFFLINE ? 'Offline' : 'Connecting…';
+    const statusLabel = status === STATUS.ONLINE ? 'Online' : status === STATUS.OFFLINE ? 'Offline' : 'Connecting…';
+    const label = nodeApi ? `${statusLabel} · node API: ${nodeApi}` : statusLabel;
 
-    return h('span', { ref: pillRef, class: className }, label);
+    return h('span', { ref: pillRef, class: className, title: 'Node status and detected node API generation' }, label);
 }
