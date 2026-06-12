@@ -48,7 +48,9 @@ class ChannelBlob(NbeContent):
 class ChannelSetKeys(NbeContent):
     type: Literal["ChannelSetKeys"] = "ChannelSetKeys"
     channel: HexBytes
-    keys: List[bytes]
+    # HexBytes (not plain bytes): content is stored as JSON in the DB, and raw
+    # bytes break its utf-8 encoding for arbitrary key material.
+    keys: List[HexBytes]
 
 
 class SDPDeclareServiceType(Enum):

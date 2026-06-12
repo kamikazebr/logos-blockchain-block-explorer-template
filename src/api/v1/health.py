@@ -12,7 +12,8 @@ from node.api.serializers.health import HealthSerializer
 
 async def get(request: NBERequest) -> Response:
     response = await request.app.state.node_api.get_health()
-    return JSONResponse(response)
+    # JSONResponse can't render a pydantic model directly; dump it first.
+    return JSONResponse(response.model_dump(mode="json"))
 
 
 async def _create_health_stream(node_api: NodeApi, *, poll_interval_seconds: int = 10) -> AsyncIterator[Health]:
