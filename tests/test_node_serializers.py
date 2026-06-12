@@ -16,11 +16,12 @@ from pathlib import Path
 
 import pytest
 
-from node.api.http import normalize_info_payload
+from node.api.http import adapt_storage_block_payload, normalize_info_payload
 from node.api.serializers.block import BlockSerializer
 from node.api.serializers.fields import bytes_from_hex_or_intarray
+from node.api.serializers.health import HealthSerializer
 from node.api.serializers.info import InfoSerializer
-from node.api.serializers.proof import Ed25519SignatureSerializer
+from node.api.serializers.proof import Ed25519SignatureSerializer, ZkSignatureSerializer
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -28,6 +29,16 @@ FIXTURES = Path(__file__).parent / "fixtures"
 @pytest.fixture
 def new_format_block() -> dict:
     return json.loads((FIXTURES / "block_new_format.json").read_text())
+
+
+@pytest.fixture
+def old_format_storage_block() -> dict:
+    """A real POST storage/block response captured from a 0.1.2 node.
+
+    The header carries no id (storage/block does not echo it); the requested
+    hash is stored under "_requested_hash" alongside the payload.
+    """
+    return json.loads((FIXTURES / "block_old_format_storage.json").read_text())
 
 
 @pytest.fixture
@@ -152,6 +163,49 @@ class TestUnsupportedOpcode:
         new_format_block["transactions"][0]["mantle_tx"]["ops"][0]["opcode"] = 99
         with pytest.raises(ValueError, match="opcode 99"):
             BlockSerializer.model_validate(new_format_block)
+
+
+class TestLegacyStorageBlock:
+    def test_adapt_injects_requested_hash(self):
+        payload = {"header": {"slot": 1}, "transactions": []}
+        adapted = adapt_storage_block_payload(payload, "ab" * 32)
+        assert adapted["header"]["id"] == "ab" * 32
+        assert payload["header"] == {"slot": 1}  # original untouched
+
+    def test_adapt_keeps_existing_id(self):
+        payload = {"header": {"id": "cc" * 32, "slot": 1}}
+        adapted = adapt_storage_block_payload(payload, "ab" * 32)
+        assert adapted["header"]["id"] == "cc" * 32
+
+    def test_real_storage_response_parses(self, old_format_storage_block):
+        requested_hash = old_format_storage_block.pop("_requested_hash")
+        adapted = adapt_storage_block_payload(old_format_storage_block, requested_hash)
+        block = BlockSerializer.model_validate(adapted)
+        assert block.header.hash == bytes.fromhex(requested_hash)
+        assert block.header.slot == old_format_storage_block["header"]["slot"]
+
+    def test_real_storage_tx_parses_with_gas_and_zk_proof(self, old_format_storage_block):
+        requested_hash = old_format_storage_block.pop("_requested_hash")
+        mantle_tx = old_format_storage_block["transactions"][0]["mantle_tx"]
+        adapted = adapt_storage_block_payload(old_format_storage_block, requested_hash)
+        block = BlockSerializer.model_validate(adapted)
+        signed_tx = block.transactions[0]
+        assert isinstance(signed_tx.operations_proofs[0], ZkSignatureSerializer)
+        tx = signed_tx.into_transaction()
+        assert tx.execution_gas_price == mantle_tx["execution_gas_price"]
+        assert tx.storage_gas_price == mantle_tx["storage_gas_price"]
+        assert len(tx.hash) == 32  # computed fallback (no node-provided hash)
+
+
+class TestHealthNodeApi:
+    def test_carries_detected_generation(self):
+        health = HealthSerializer.from_healthy(node_api="legacy (<= 0.1.2)").into_health()
+        assert health.healthy is True
+        assert health.node_api == "legacy (<= 0.1.2)"
+
+    def test_defaults_to_none(self):
+        health = HealthSerializer.from_unhealthy().into_health()
+        assert health.node_api is None
 
 
 def _minimal_header() -> dict:
